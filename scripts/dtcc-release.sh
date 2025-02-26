@@ -14,11 +14,13 @@ show_usage() {
     echo "  -h, --help     Show this help message"
     echo "  -d, --dry-run  Show what would happen without making changes"
     echo "  -o, --org ORG  Specify GitHub organization (default: dtcc-platform)"
+    echo "  -f, --force    Force overwrite main with develop's pyproject.toml on conflict"
 }
 
 # Handle parameters
 ORGANIZATION="dtcc-platform"
 DRY_RUN=false
+FORCE=false
 REPO=""
 VERSION=""
 
@@ -27,6 +29,7 @@ while [[ "$#" -gt 0 ]]; do
         -h|--help) show_usage; exit 0 ;;
         -d|--dry-run) DRY_RUN=true; shift ;;
         -o|--org) ORGANIZATION="$2"; shift 2 ;;
+        -f|--force) FORCE=true; shift ;;
         *)
             if [ -z "$REPO" ]; then REPO="$1"
             elif [ -z "$VERSION" ]; then VERSION="$1"
@@ -96,25 +99,42 @@ fi
 execute git tag "v$DEV_VERSION"
 execute git push origin develop --tags
 
+# Save a copy of the develop pyproject.toml
+cp pyproject.toml pyproject.toml.develop
+
 # Update main branch
 echo "=== Updating main branch ==="
 execute git checkout main
 execute git pull
-execute git merge develop
 
-# Fix pyproject.toml from develop
-execute git checkout develop -- pyproject.toml
-execute git add pyproject.toml
-execute git commit --no-edit || echo "No changes to commit"
+# Handle merge with conflict resolution strategy
+echo "=== Merging develop into main ==="
+if [ "$FORCE" = true ]; then
+    # Try to merge, but if conflict occurs, use develop's pyproject.toml
+    git merge develop || true
+    
+    if git status | grep -q "Unmerged paths"; then
+        echo "Merge conflict detected, resolving with develop's version..."
+        cp pyproject.toml.develop pyproject.toml
+        git add pyproject.toml
+        git commit -m "Merge develop into main, using develop's pyproject.toml"
+    fi
+else
+    # Alternative approach - don't merge, just cherry-pick what we need
+    echo "Skipping merge, applying changes directly..."
+    cp pyproject.toml.develop pyproject.toml
+    git add pyproject.toml
+fi
 
 # Update to release version (remove dev suffix)
 sed_command "pyproject.toml" "s/version *= *\"${VERSION}dev\"/version = \"${VERSION}\"/"
 
-# Replace any Git dependencies with PyPI versions (using a different delimiter)
+# Replace any Git dependencies with PyPI versions
 sed_command "pyproject.toml" "s|\"\\([^\"]*\\)@git+https://github.com/[^\"]*\\.git@develop\",|\"\\1\"|g"
 
 # Commit and tag release
-execute git commit -a -m "Bump version to $VERSION"
+git add pyproject.toml
+execute git commit -m "Bump version to $VERSION"
 execute git tag "v$VERSION"
 execute git push origin main --tags
 
