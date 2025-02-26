@@ -41,10 +41,15 @@ git checkout main
 git pull
 git merge develop
 
-# If there's a conflict in pyproject.toml, override with develop’s version
-git checkout develop -- pyproject.toml
-git add pyproject.toml
-git commit --no-edit
+
+# Attempt merge
+if ! git merge develop; then
+  echo "Merge conflict detected. Resolving by taking develop's version of pyproject.toml..."
+  # Use --theirs to pick develop's version for the conflicting file
+  git checkout --theirs -- pyproject.toml
+  git add pyproject.toml
+  git commit -m "Merge develop into main, overriding pyproject.toml with develop version"
+fi
 
 # Remove 'dev' suffix and update dependency in pyproject.toml
 if [[ "$OSTYPE" == "darwin"* ]]; then
