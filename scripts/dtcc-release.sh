@@ -52,10 +52,14 @@ fi
 # Remove 'dev' suffix and update dependency in pyproject.toml
 if [[ "$OSTYPE" == "darwin"* ]]; then
   sed -i '' "s/\(version *= *\"${VERSION}\)dev\"/\1\"/" pyproject.toml
-  sed -i '' 's#"dtcc-core@git+https://github.com/dtcc-platform/dtcc-core.git@develop",#"dtcc-core"#g' pyproject.toml
+  #sed -i '' 's#"dtcc-core@git+https://github.com/dtcc-platform/dtcc-core.git@develop",#"dtcc-core"#g' pyproject.toml
+  sed -i '' 's/"\([^@"]*\)@git[^"]*"/"\1"/g' pyproject.toml
+
 else
   sed -i "s/\(version *= *\"${VERSION}\)dev\"/\1\"/" pyproject.toml
-  sed -i 's#"dtcc-core@git+https://github.com/dtcc-platform/dtcc-core.git@develop",#"dtcc-core"#g' pyproject.toml
+  #sed -i 's#"dtcc-core@git+https://github.com/dtcc-platform/dtcc-core.git@develop",#"dtcc-core"#g' pyproject.toml
+  sed -i 's/"\([^@"]*\)@git[^"]*"/"\1"/g' pyproject.toml
+
 fi
 
 git commit -a -m "Bump version to ${VERSION}"
