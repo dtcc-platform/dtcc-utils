@@ -65,4 +65,4 @@ git push origin main --tags
 echo "Release process completed successfully."
 
 # Optional: clean up the temporary directory
-# rm -rf "$DIR"
+rm -rf "$DIR"
