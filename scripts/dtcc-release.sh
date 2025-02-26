@@ -17,6 +17,11 @@ show_usage() {
 }
 
 # Handle parameters
+ORGANIZATION="dtcc-platform"
+DRY_RUN=false
+REPO=""
+VERSION=""
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help) show_usage; exit 0 ;;
@@ -37,10 +42,6 @@ if [ -z "$REPO" ] || [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# Set defaults
-ORGANIZATION=${ORGANIZATION:-"dtcc-platform"}
-DRY_RUN=${DRY_RUN:-false}
-
 # Create and track temporary directory
 TEMP_DIR=$(mktemp -d)
 echo "Working in: $TEMP_DIR"
@@ -59,15 +60,29 @@ execute() {
 # Function to update version based on platform
 update_version() {
     local file="$1"
-    local pattern="$2"
-    local replacement="$3"
+    local search="$2"
+    local replace="$3"
     
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # MacOS version of sed
-        execute sed -i '' "$pattern" "$file"
+        # macOS version (BSD sed)
+        execute sed -i '' -e "s|${search}|${replace}|g" "$file"
     else
-        # Linux version of sed
-        execute sed -i "$pattern" "$file"
+        # Linux version (GNU sed)
+        execute sed -i -e "s|${search}|${replace}|g" "$file"
+    fi
+}
+
+# Function for regex pattern replacement (for more complex patterns)
+update_with_pattern() {
+    local file="$1"
+    local pattern="$2"
+    
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS version (BSD sed)
+        execute sed -i '' -e "$pattern" "$file"
+    else
+        # Linux version (GNU sed)
+        execute sed -i -e "$pattern" "$file"
     fi
 }
 
@@ -82,38 +97,4 @@ execute git checkout develop
 execute git pull
 
 # Get current version for better logging
-CURRENT_VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' pyproject.toml || echo "unknown")
-DEV_VERSION="${VERSION}dev"
-echo "Current: $CURRENT_VERSION → New: $DEV_VERSION"
-
-# Update version in develop
-update_version "pyproject.toml" "s/\(version *= *\)\"[^\"]*\"/\1\"${DEV_VERSION}\"/"
-
-# Commit and tag changes in develop
-if ! execute git diff --quiet; then
-    execute git commit -a -m "Bump version to $DEV_VERSION"
-fi
-execute git tag "v$DEV_VERSION"
-execute git push origin develop --tags
-
-# Update main branch
-echo "=== Updating main branch ==="
-execute git checkout main
-execute git pull
-execute git merge develop
-
-# Fix pyproject.toml from develop
-execute git checkout develop -- pyproject.toml
-execute git add pyproject.toml
-execute git commit --no-edit || echo "No changes to commit"
-
-# Update to release version
-update_version "pyproject.toml" "s/\(version *= *\"${VERSION}\)dev\"/\1\"/"
-update_version "pyproject.toml" 's#"dtcc-core@git+https://github.com/dtcc-platform/dtcc-core.git@develop",#"dtcc-core"#g'
-
-# Commit and tag release
-execute git commit -a -m "Bump version to $VERSION"
-execute git tag "v$VERSION"
-execute git push origin main --tags
-
-echo "=== Release preparation completed successfully! ==="
+CURRENT_VERSION=$(grep -oP 'version
