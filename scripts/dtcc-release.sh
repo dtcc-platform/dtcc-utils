@@ -57,32 +57,17 @@ execute() {
     fi
 }
 
-# Function to update version based on platform
-update_version() {
-    local file="$1"
-    local search="$2"
-    local replace="$3"
-    
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version (BSD sed)
-        execute sed -i '' -e "s|${search}|${replace}|g" "$file"
-    else
-        # Linux version (GNU sed)
-        execute sed -i -e "s|${search}|${replace}|g" "$file"
-    fi
-}
-
-# Function for regex pattern replacement (for more complex patterns)
-update_with_pattern() {
+# Function for sed operations that works on both Linux and macOS
+sed_command() {
     local file="$1"
     local pattern="$2"
     
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version (BSD sed)
-        execute sed -i '' -e "$pattern" "$file"
+        # macOS requires an empty string after -i
+        execute sed -i "" "$pattern" "$file"
     else
-        # Linux version (GNU sed)
-        execute sed -i -e "$pattern" "$file"
+        # Linux version
+        execute sed -i "$pattern" "$file"
     fi
 }
 
@@ -97,4 +82,40 @@ execute git checkout develop
 execute git pull
 
 # Get current version for better logging
-CURRENT_VERSION=$(grep -oP 'version
+CURRENT_VERSION=$(grep 'version *=' pyproject.toml | sed 's/.*version *= *"\([^"]*\)".*/\1/' || echo "unknown")
+DEV_VERSION="${VERSION}dev"
+echo "Current: $CURRENT_VERSION → New: $DEV_VERSION"
+
+# Update version in develop
+sed_command "pyproject.toml" "s/version *= *\"[^\"]*\"/version = \"${DEV_VERSION}\"/"
+
+# Commit and tag changes in develop
+if ! execute git diff --quiet; then
+    execute git commit -a -m "Bump version to $DEV_VERSION"
+fi
+execute git tag "v$DEV_VERSION"
+execute git push origin develop --tags
+
+# Update main branch
+echo "=== Updating main branch ==="
+execute git checkout main
+execute git pull
+execute git merge develop
+
+# Fix pyproject.toml from develop
+execute git checkout develop -- pyproject.toml
+execute git add pyproject.toml
+execute git commit --no-edit || echo "No changes to commit"
+
+# Update to release version (remove dev suffix)
+sed_command "pyproject.toml" "s/version *= *\"${VERSION}dev\"/version = \"${VERSION}\"/"
+
+# Replace any Git dependencies with PyPI versions (using a different delimiter)
+sed_command "pyproject.toml" "s|\"\\([^\"]*\\)@git+https://github.com/[^\"]*\\.git@develop\",|\"\\1\"|g"
+
+# Commit and tag release
+execute git commit -a -m "Bump version to $VERSION"
+execute git tag "v$VERSION"
+execute git push origin main --tags
+
+echo "=== Release preparation completed successfully! ==="
