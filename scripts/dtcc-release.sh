@@ -39,8 +39,6 @@ git push origin develop --tags
 echo "Switching to main branch and merging develop..."
 git checkout main
 git pull
-git merge develop
-
 
 # Attempt merge
 if ! git merge develop; then
