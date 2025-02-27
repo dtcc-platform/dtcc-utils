@@ -67,6 +67,6 @@ git tag "v${VERSION}"
 git push origin main --tags
 
 echo "Release process completed successfully."
-
+echo "Proceed to 1) https://github.com/dtcc-platform/$REPO/releases to actually release on Github and 2) https://github.com/dtcc-platform/$REPO/actions/workflows/ci-wheels.yaml to run the dispatch workflow on main for PyPI release!
 # Optional: clean up the temporary directory
 rm -rf "$DIR"
