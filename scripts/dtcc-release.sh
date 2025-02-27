@@ -1,3 +1,6 @@
+# Copyright(C) 2025 VA Naserentin
+# Licensed under the MIT License
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -70,3 +73,8 @@ echo "Release process completed successfully."
 echo "Proceed to 1) https://github.com/dtcc-platform/$REPO/releases to actually release on Github and 2) https://github.com/dtcc-platform/$REPO/actions/workflows/ci-wheels.yaml to run the dispatch workflow on main for PyPI release!"
 # Optional: clean up the temporary directory
 rm -rf "$DIR"
+
+# If user wants to reset head to skip various dummy commits can do so via:
+# git reset --hard HEAD~9 , if user wants to remove last 9 commits or
+# git reset --hard commithash, if user wants to go to the commithash and remove all after that
+# git push --force to push to remote repo the changes
