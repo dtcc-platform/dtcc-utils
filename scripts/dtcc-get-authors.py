@@ -1,3 +1,6 @@
+# Copyright(C) 2025 VA Naserentin
+# Licensed under the MIT License
+
 #!/usr/bin/env python3
 """
 Scholarly Publications Retriever
