@@ -223,12 +223,55 @@ def get_semantic_scholar_profile(session, orcid):
     }
     
     try:
+        # First attempt: direct ORCID lookup
         response = session.get(url, params=params)
+        
+        # Handle 404 specifically (author not found)
+        if response.status_code == 404:
+            print(f"Author with ORCID {orcid} not found in Semantic Scholar.", file=sys.stderr)
+            print("Trying alternative lookup methods...", file=sys.stderr)
+            
+            # Get name from ORCID profile and try to search by name
+            orcid_profile = get_orcid_profile(session, orcid)
+            if orcid_profile:
+                first_name = orcid_profile.get("person", {}).get("name", {}).get("given-names", {}).get("value", "")
+                last_name = orcid_profile.get("person", {}).get("name", {}).get("family-name", {}).get("value", "")
+                
+                if first_name and last_name:
+                    author_name = f"{first_name} {last_name}"
+                    # Try to search Semantic Scholar by author name
+                    search_url = "https://api.semanticscholar.org/graph/v1/author/search"
+                    search_params = {
+                        "query": author_name,
+                        "fields": "name,aliases,affiliations,homepage,paperCount,citationCount,hIndex"
+                    }
+                    
+                    try:
+                        search_response = session.get(search_url, params=search_params)
+                        search_response.raise_for_status()
+                        search_data = search_response.json()
+                        
+                        # If we found any matches
+                        if search_data.get("data") and len(search_data["data"]) > 0:
+                            print(f"Found potential Semantic Scholar profile for {author_name}", file=sys.stderr)
+                            # Return the first match as the likely profile
+                            return search_data["data"][0]
+                    except requests.exceptions.RequestException as e:
+                        print(f"Error searching Semantic Scholar by name: {e}", file=sys.stderr)
+            
+            # If we couldn't find the author, return None
+            return None
+        
+        # For other errors, raise exception
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error retrieving Semantic Scholar profile: {e}", file=sys.stderr)
-        return None
+        if "404" in str(e):
+            print(f"Author with ORCID {orcid} not found in Semantic Scholar.", file=sys.stderr)
+            return None
+        else:
+            print(f"Error retrieving Semantic Scholar profile: {e}", file=sys.stderr)
+            return None
 
 
 def get_semantic_scholar_publications(session, author_id):
@@ -521,108 +564,184 @@ def get_core_publications(session, orcid):
 # ----- Scopus API -----
 
 def get_scopus_publications(session, orcid):
-    """Retrieve publications from Scopus using ORCID"""
+    """Retrieve publications from Scopus using ORCID with pagination"""
     # Scopus API requires an API key
     # Register at https://dev.elsevier.com and subscribe to Scopus APIs
     API_KEY = "YOUR_SCOPUS_API_KEY"  # Replace with your Scopus API key
+    API_KEY= "15dc1f98cfe0f0dd91f339dd2320ab97"
+
+    # Check if API key is provided
+    if API_KEY == "YOUR_SCOPUS_API_KEY":
+        print("Scopus API key not provided. Skipping Scopus search.", file=sys.stderr)
+        return []
     
     url = "https://api.elsevier.com/content/search/scopus"
     headers = {
         "X-ELS-APIKey": API_KEY,
         "Accept": "application/json"
     }
-    params = {
-        "query": f"ORCID({orcid})",
-        "count": 200,
-        "view": "COMPLETE"
-    }
     
-    # Check if API key is provided
-    if API_KEY == "YOUR_SCOPUS_API_KEY":
-        print("Scopus API key not provided. Skipping Scopus search.", file=sys.stderr)
-        return []
+    # Format ORCID for Scopus query
+    formatted_orcid = orcid.replace("-", "")
     
-    try:
-        response = session.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
+    # Use a smaller count to avoid service level limitations
+    # But implement pagination to get all results
+    count_per_page = 25
+    
+    publications = []
+    start_index = 0
+    total_results = None
+    
+    print("Retrieving Scopus publications with pagination...")
+    
+    while True:
+        # Set up parameters for this batch
+        params = {
+            "query": f"ORCID({formatted_orcid})",
+            "count": count_per_page,
+            "start": start_index,
+            "view": "STANDARD"
+        }
         
-        publications = []
-        entries = data.get("search-results", {}).get("entry", [])
-        
-        for entry in entries:
-            # Extract title
-            title = entry.get("dc:title", "Unknown Title")
+        try:
+            # Get this batch of results
+            response = session.get(url, headers=headers, params=params)
             
-            # Extract authors
-            authors = []
-            if "author" in entry:
-                for author in entry["author"]:
-                    if "authname" in author:
-                        authors.append(author["authname"])
-                    elif "given-name" in author and "surname" in author:
-                        authors.append(f"{author['given-name']} {author['surname']}")
+            if response.status_code != 200:
+                print(f"Scopus API returned status code: {response.status_code}", file=sys.stderr)
+                error_text = response.text[:500] if response.text else "No detailed error message"
+                print(f"Response text: {error_text}", file=sys.stderr)
+                
+                # If this is the first request and it failed, try alternative approach
+                if start_index == 0:
+                    print("Trying alternative approach with Scopus Search API...", file=sys.stderr)
+                    params = {
+                        "query": f"ORCID({formatted_orcid})",
+                        "count": 10,
+                        "field": "dc:title,dc:creator,prism:publicationName,prism:coverDate,prism:doi"
+                    }
+                    response = session.get(url, headers=headers, params=params)
+                    
+                    if response.status_code != 200:
+                        print(f"Alternative Scopus approach also failed: {response.status_code}", file=sys.stderr)
+                        return []
+                else:
+                    # If a pagination request fails, return what we have so far
+                    print(f"Pagination request failed. Returning {len(publications)} publications found so far.", file=sys.stderr)
+                    return publications
             
-            # Extract year
-            year = None
-            if "prism:coverDate" in entry:
-                year_match = re.search(r"^(\d{4})", entry["prism:coverDate"])
-                if year_match:
-                    year = int(year_match.group(1))
+            data = response.json()
+            search_results = data.get("search-results", {})
             
-            # Extract DOI
-            doi = entry.get("prism:doi")
+            # Extract total results count if this is the first request
+            if total_results is None:
+                total_count_entry = next((item for item in search_results.get("opensearch:totalResults", []) 
+                                        if isinstance(item, dict) and "@value" in item), None)
+                
+                if total_count_entry:
+                    total_results = int(total_count_entry["@value"])
+                else:
+                    try:
+                        # Try direct value if not a list of dictionaries
+                        total_results_str = search_results.get("opensearch:totalResults", "0")
+                        total_results = int(total_results_str)
+                    except (ValueError, TypeError):
+                        total_results = 0
+                
+                print(f"Total publications in Scopus: {total_results}")
             
-            # Extract journal/source
-            journal = entry.get("prism:publicationName")
+            # Process the results from this batch
+            entries = search_results.get("entry", [])
             
-            # Extract volume, issue, pages
-            volume = entry.get("prism:volume")
-            issue = entry.get("prism:issueIdentifier")
-            pages = entry.get("prism:pageRange")
+            batch_pubs = []
+            for entry in entries:
+                # Extract title (with error handling)
+                title = entry.get("dc:title", "Unknown Title")
+                
+                # Extract authors (with error handling)
+                authors = []
+                if "author" in entry:
+                    if isinstance(entry["author"], list):
+                        for author in entry["author"]:
+                            if isinstance(author, dict):
+                                if "authname" in author:
+                                    authors.append(author["authname"])
+                                elif "given-name" in author and "surname" in author:
+                                    authors.append(f"{author['given-name']} {author['surname']}")
+                    elif isinstance(entry["author"], dict):  # Handle single author case
+                        if "authname" in entry["author"]:
+                            authors.append(entry["author"]["authname"])
+                        elif "given-name" in entry["author"] and "surname" in entry["author"]:
+                            authors.append(f"{entry['author']['given-name']} {entry['author']['surname']}")
+                
+                # Extract year (with error handling)
+                year = None
+                if "prism:coverDate" in entry and entry["prism:coverDate"]:
+                    year_match = re.search(r"^(\d{4})", entry["prism:coverDate"])
+                    if year_match:
+                        year = int(year_match.group(1))
+                
+                # Extract DOI (with error handling)
+                doi = entry.get("prism:doi")
+                
+                # Extract journal/source (with error handling)
+                journal = entry.get("prism:publicationName")
+                
+                # Extract volume, issue, pages (with error handling)
+                volume = entry.get("prism:volume")
+                issue = entry.get("prism:issueIdentifier")
+                pages = entry.get("prism:pageRange")
+                
+                # Extract citations if available
+                citations = None
+                if "citedby-count" in entry:
+                    try:
+                        citations = int(entry["citedby-count"])
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Create publication object
+                pub = Publication(
+                    title=title,
+                    authors=authors,
+                    year=year,
+                    doi=doi,
+                    journal=journal,
+                    volume=volume,
+                    issue=issue,
+                    pages=pages,
+                    url=None,  # URL omitted in simplified view
+                    abstract=None,  # Abstract omitted in simplified view
+                    citations=citations,
+                    source="Scopus"
+                )
+                batch_pubs.append(pub)
             
-            # Extract abstract
-            abstract = None
-            if "dc:description" in entry:
-                abstract = entry["dc:description"]
+            # Add this batch to our collection
+            publications.extend(batch_pubs)
+            print(f"Retrieved {len(batch_pubs)} Scopus publications (batch starting at {start_index})")
             
-            # Extract citations count
-            citations = None
-            if "citedby-count" in entry:
-                try:
-                    citations = int(entry["citedby-count"])
-                except (ValueError, TypeError):
-                    pass
+            # Check if we need to continue pagination
+            if total_results is not None and len(publications) >= total_results:
+                break
+                
+            # If we didn't get a full page, we're likely at the end
+            if len(batch_pubs) < count_per_page:
+                break
+                
+            # Increment start index for next batch
+            start_index += count_per_page
             
-            # Extract URL
-            url = None
-            if "link" in entry:
-                for link in entry["link"]:
-                    if link.get("@ref") == "scopus":
-                        url = link.get("@href")
-                        break
+            # Add a small delay to avoid rate limiting
+            time.sleep(0.5)
             
-            # Create publication object
-            pub = Publication(
-                title=title,
-                authors=authors,
-                year=year,
-                doi=doi,
-                journal=journal,
-                volume=volume,
-                issue=issue,
-                pages=pages,
-                url=url,
-                abstract=abstract,
-                citations=citations,
-                source="Scopus"
-            )
-            publications.append(pub)
-        
-        return publications
-    except requests.exceptions.RequestException as e:
-        print(f"Error retrieving Scopus publications: {e}", file=sys.stderr)
-        return []
+        except requests.exceptions.RequestException as e:
+            print(f"Error retrieving Scopus publications: {e}", file=sys.stderr)
+            # Return what we have so far
+            return publications
+    
+    print(f"Completed Scopus retrieval. Found {len(publications)} publications.")
+    return publications
 
 
 # ----- DBLP API (for Computer Science) -----
@@ -996,10 +1115,10 @@ def main():
     # all_publications.extend(core_pubs)
     
     # Scopus (commented out as it requires an API key)
-    # print("Querying Scopus...")
-    # scopus_pubs = get_scopus_publications(session, args.orcid)
-    # print(f"  Found {len(scopus_pubs)} publications")
-    # all_publications.extend(scopus_pubs)
+    print("Querying Scopus...")
+    scopus_pubs = get_scopus_publications(session, args.orcid)
+    print(f"  Found {len(scopus_pubs)} publications")
+    all_publications.extend(scopus_pubs)
     
     # Merge and deduplicate
     print("Merging and deduplicating results...")
