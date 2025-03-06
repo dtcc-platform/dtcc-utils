@@ -33,7 +33,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
 else
   sed -i "s/\(version *= *\)\"[^\"]*\"/\1\"${VERSION}dev\"/" pyproject.toml
 fi
-
+#cat pyproject.toml
 git commit -a -m "Bump version to ${VERSION}dev"
 git tag "v${VERSION}dev"
 git push origin develop --tags
@@ -70,7 +70,7 @@ git tag "v${VERSION}"
 git push origin main --tags
 
 echo "Release process completed successfully."
-echo "Proceed to 1) https://github.com/dtcc-platform/$REPO/releases to actually release on Github and 2) https://github.com/dtcc-platform/$REPO/actions/workflows/ci-wheels.yaml to run the dispatch workflow on main for PyPI release!"
+echo "Proceed to 1) https://github.com/dtcc-platform/$REPO/releases to actually release on Github and 2) https://github.com/dtcc-platform/$REPO/actions/workflows/ci-wheels.yml to run the dispatch workflow on main for PyPI release!"
 # Optional: clean up the temporary directory
 rm -rf "$DIR"
 
